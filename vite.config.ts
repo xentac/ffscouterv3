@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { defineConfig } from 'vite';
 import monkey from 'vite-plugin-monkey';
 
@@ -16,10 +17,17 @@ export default defineConfig({
         namespace: 'mavri',
         license: 'GPLv3',
         match: ['https://www.torn.com/*'],
-        'run-at': 'document-end', // This will need to be "document-start" to intercept http stuff
+        'run-at': 'document-start', // This has to be "document-start" to intercept http & ws
       },
     }),
   ],
+  resolve: {
+    alias: {
+      '@ui': path.resolve(__dirname, 'src/ui'),
+      '@utils': path.resolve(__dirname, 'src/utils'),
+      '@features': path.resolve(__dirname, 'src/features'),
+    },
+  },
   build: {
     minify: false,
   },

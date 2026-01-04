@@ -17,7 +17,7 @@ export enum LogLevel {
 /**
  * Logger class providing various logging methods with level filtering and formatting
  */
-export class Logger {
+class Logger {
   /** Prefix string to prepend to all log messages */
   private prefix: string;
 

@@ -37,6 +37,7 @@ export function setHttpInterceptor(interceptor: HttpInterceptor): void {
 
 function patchFetch(): void {
   try {
+    //@ts-expect-error TODO: maybe one day remove this :P
     const originalFetch: typeof fetch = pageWindow.fetch.bind(pageWindow);
     (pageWindow as Window & { fetch: typeof fetch }).fetch =
       async function patchedFetch(

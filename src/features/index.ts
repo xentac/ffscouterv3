@@ -1,10 +1,6 @@
-// Each feature gets its own folder
-// Ideally CSS should be limited to positional shit (or just do inline)
+import TestFeature from './test-feature';
 
-export interface Feature {
-  name: string;
-  description: string;
+export const Features = [TestFeature];
 
-  shouldRun: () => Promise<boolean>; // checks if feature is toggled + if should run on current page
-  run: () => Promise<void>;
-}
+// You'll need to add a new export here for each feature
+// It's a pain in the ass and I want something that's less annoying, but i doubt it's possible :p

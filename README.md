@@ -1,3 +1,3 @@
-# Torm Base Script
+# Torn Base Script
 
-Xentac should probably change this
+There's not really much to say about it.
