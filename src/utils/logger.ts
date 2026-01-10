@@ -158,4 +158,4 @@ class Logger {
   }
 }
 
-export default new Logger('CHANGE_ME');
+export default new Logger('FFSV3');
