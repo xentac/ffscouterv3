@@ -136,4 +136,4 @@ export class Storage {
   }
 }
 
-export default new Storage('mavri.');
+export default new Storage('ffscouterv3.');
