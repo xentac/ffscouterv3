@@ -52,10 +52,41 @@ function is_ff_success(resp: FFSuccess[] | FFError): resp is FFSuccess[] {
   return (resp as FFError).code === undefined;
 }
 
+type FFApiRateLimits = {
+  requests_reset_time: Date;
+  requests_remaining: number;
+  requests_rate_limit: number;
+  requests_this_minute: number;
+};
+
+export type FFApiQueryResponse = {
+  result: Map<PlayerId, FFData>;
+  blank: boolean;
+  limits?: FFApiRateLimits;
+};
+
+class FFApiError extends Error {
+  ff_api_limits?: FFApiRateLimits;
+  ff_api_error?: FFError;
+
+  constructor(
+    message: string,
+    options?: {
+      cause?: Error;
+      ff_api_limits?: FFApiRateLimits;
+      ff_api_error?: FFError;
+    },
+  ) {
+    super(message, options);
+    this.ff_api_limits = options?.ff_api_limits;
+    this.ff_api_error = options?.ff_api_error;
+  }
+}
+
 export const query_stats = async (
   key: TornApiKey,
   player_ids: PlayerId[],
-): Promise<Map<PlayerId, FFData>> => {
+): Promise<FFApiQueryResponse> => {
   const url = make_stats_url(key, player_ids);
 
   const resp = await gmRequest({
@@ -64,26 +95,34 @@ export const query_stats = async (
   });
 
   if (!resp) {
-    return new Map();
+    return { result: new Map(), blank: true };
   }
   if (resp.status !== 200) {
     try {
       const err: FFError = JSON.parse(resp.responseText);
       if (err.error) {
-        throw new Error(
+        throw new FFApiError(
           `API request failed. Error: ${err.error}; Code: ${err.code}`,
+          { ff_api_error: err },
         );
       } else {
-        throw new Error(`API request failed. HTTP status code: ${resp.status}`);
+        throw new FFApiError(
+          `API request failed. HTTP status code: ${resp.status}`,
+        );
       }
     } catch {
-      throw new Error(`API request failed. HTTP status code: ${resp.status}`);
+      throw new FFApiError(
+        `API request failed. HTTP status code: ${resp.status}`,
+      );
     }
   }
 
   const ff_response: FFSuccess[] | FFError = JSON.parse(resp.responseText);
   if (!is_ff_success(ff_response)) {
-    throw new Error(ff_response.error); // TODO figure out how to raise codes
+    throw new FFApiError(
+      `API request failed. Error: ${ff_response.error}; Code: ${ff_response.code}`,
+      { ff_api_error: ff_response },
+    );
   }
   const results: Map<PlayerId, FFData> = new Map();
   ff_response.forEach((result) => {
@@ -111,7 +150,17 @@ export const query_stats = async (
     }
   });
 
-  return results;
+  // Make sure the results we return contains an entry for every requested id
+  for (const id of player_ids) {
+    if (!results.get(id)) {
+      results.set(id, {
+        no_data: true,
+        player_id: id,
+      });
+    }
+  }
+
+  return { result: results, blank: false };
 
   // TODO Handle limit tracking
 };
