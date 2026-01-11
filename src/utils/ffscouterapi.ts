@@ -1,3 +1,4 @@
+import { query_stats } from "./api";
 import { FFCache } from "./ffcache";
 import logger from "./logger";
 import type { FFData, PlayerId } from "./types";
@@ -30,11 +31,23 @@ export class FFScouterAPI {
   get_estimates = async (player_ids: PlayerId[]) => {
     const cached = await this.get_cached_estimates(player_ids);
 
-    const still_needed = [];
-    cached.forEach((elem, id) => {
+    const still_needed = cached.entries().filter(([_id, elem]) => {
       if (!elem || elem.no_data) {
-        still_needed.push(id);
+        return true;
       }
+      return false;
     });
+
+    this.query(Array.from(still_needed.map(([id, _elem]) => id)));
+  };
+
+  query = async (player_ids: PlayerId[]) => {
+    try {
+      const results = await query_stats(this.key, player_ids);
+      return results;
+    } catch (error) {
+      logger.info(error);
+      return [];
+    }
   };
 }

@@ -28,6 +28,7 @@ export default defineConfig(({ mode }) => {
           version: "0.0.0",
           namespace: "xentac",
           license: "GPLv3",
+          connect: "ffscouter.com",
           match: ["https://www.torn.com/*"],
           "run-at": "document-start", // This has to be "document-start" to intercept http & ws
         },

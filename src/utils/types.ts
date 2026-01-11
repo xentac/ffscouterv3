@@ -1,3 +1,5 @@
+export type TornApiKey = string;
+
 export type PlayerId = number;
 
 export type Timestamp = number; // ms
@@ -5,7 +7,7 @@ export type Timestamp = number; // ms
 export type FFData =
   | {
       no_data: false;
-      ff_score: number;
+      fair_fight: number;
       last_updated: Timestamp;
       bs_estimate: number;
       bs_estimate_human: string;
