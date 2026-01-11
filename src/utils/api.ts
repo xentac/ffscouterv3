@@ -14,7 +14,7 @@ export const client = new TornApiClient({
 });
 
 // Promise wrapper function
-export async function gmRequest<T = any>(
+export async function gmRequest<T = object>(
   options: Tampermonkey.Request<T>,
 ): Promise<Tampermonkey.Response<T>> {
   return new Promise((resolve, reject) => {
@@ -53,10 +53,10 @@ function is_ff_success(resp: FFSuccess[] | FFError): resp is FFSuccess[] {
 }
 
 type FFApiRateLimits = {
-  requests_reset_time: Date;
-  requests_remaining: number;
-  requests_rate_limit: number;
-  requests_this_minute: number;
+  reset_time: Date;
+  remaining: number;
+  rate_limit: number;
+  this_minute: number;
 };
 
 export type FFApiQueryResponse = {
@@ -65,7 +65,7 @@ export type FFApiQueryResponse = {
   limits?: FFApiRateLimits;
 };
 
-class FFApiError extends Error {
+export class FFApiError extends Error {
   ff_api_limits?: FFApiRateLimits;
   ff_api_error?: FFError;
 
@@ -86,10 +86,11 @@ class FFApiError extends Error {
 export const query_stats = async (
   key: TornApiKey,
   player_ids: PlayerId[],
+  requester: typeof gmRequest = gmRequest,
 ): Promise<FFApiQueryResponse> => {
   const url = make_stats_url(key, player_ids);
 
-  const resp = await gmRequest({
+  const resp = await requester({
     method: "GET",
     url: url,
   });
@@ -97,22 +98,27 @@ export const query_stats = async (
   if (!resp) {
     return { result: new Map(), blank: true };
   }
+
+  const limits = parse_limit_headers(resp.responseHeaders);
+
   if (resp.status !== 200) {
     try {
       const err: FFError = JSON.parse(resp.responseText);
       if (err.error) {
         throw new FFApiError(
           `API request failed. Error: ${err.error}; Code: ${err.code}`,
-          { ff_api_error: err },
+          { ff_api_error: err, ff_api_limits: limits },
         );
       } else {
         throw new FFApiError(
           `API request failed. HTTP status code: ${resp.status}`,
+          { ff_api_limits: limits },
         );
       }
     } catch {
       throw new FFApiError(
         `API request failed. HTTP status code: ${resp.status}`,
+        { ff_api_limits: limits },
       );
     }
   }
@@ -121,7 +127,7 @@ export const query_stats = async (
   if (!is_ff_success(ff_response)) {
     throw new FFApiError(
       `API request failed. Error: ${ff_response.error}; Code: ${ff_response.code}`,
-      { ff_api_error: ff_response },
+      { ff_api_error: ff_response, ff_api_limits: limits },
     );
   }
   const results: Map<PlayerId, FFData> = new Map();
@@ -160,7 +166,33 @@ export const query_stats = async (
     }
   }
 
-  return { result: results, blank: false };
+  return { result: results, blank: false, limits: limits };
+};
 
-  // TODO Handle limit tracking
+const parse_limit_headers = (
+  responseHeaders: string,
+): FFApiRateLimits | undefined => {
+  const headerLines = responseHeaders.split("\n");
+  const headers: Map<string, string> = new Map();
+  for (const line of headerLines) {
+    const [key, value] = line.split(":", 2);
+    if (!key || !value) {
+      continue;
+    }
+    headers.set(key, value.trim());
+  }
+  const reset_time_str = headers.get("x-ratelimit-reset-timestamp");
+  const remaining_str = headers.get("x-ratelimit-remaining");
+  const rate_limit_str = headers.get("x-ratelimit-limit");
+  if (reset_time_str && remaining_str && rate_limit_str) {
+    const remaining = parseInt(remaining_str, 10);
+    const rate_limit = parseInt(rate_limit_str, 10);
+    const this_minute = rate_limit - remaining;
+    return {
+      reset_time: new Date(parseInt(reset_time_str, 10) * 1000),
+      remaining,
+      rate_limit,
+      this_minute,
+    };
+  }
 };

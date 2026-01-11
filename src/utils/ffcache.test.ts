@@ -18,7 +18,7 @@ const players: Map<PlayerId, FFData> = new Map([
     2,
     {
       no_data: false,
-      ff_score: 3.0,
+      fair_fight: 3.0,
       last_updated: Date.now() - 10 * SEC,
       bs_estimate: 1000,
       bs_estimate_human: "1k",
@@ -29,7 +29,7 @@ const players: Map<PlayerId, FFData> = new Map([
     3,
     {
       no_data: false,
-      ff_score: 11.0,
+      fair_fight: 11.0,
       last_updated: Date.now() - 10 * SEC,
       bs_estimate: 1_000_000,
       bs_estimate_human: "1m",

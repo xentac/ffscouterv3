@@ -5,7 +5,7 @@ import type { FFData, PlayerId, TornApiKey } from "./types";
 
 const DB_NAME = "FFSV3-cache";
 
-export class FFScouterAPI {
+export class FFScouter {
   private key: string;
 
   private cache: FFCache = new FFCache(DB_NAME);
