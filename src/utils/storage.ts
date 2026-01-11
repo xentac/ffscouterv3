@@ -1,4 +1,4 @@
-import logger from './logger';
+import logger from "./logger";
 
 export enum Time {
   Seconds = 1_000,
@@ -131,9 +131,9 @@ export class Storage {
           localStorage.removeItem(key);
         });
     } catch (error) {
-      logger.error('Error clearing storage:', error);
+      logger.error("Error clearing storage:", error);
     }
   }
 }
 
-export default new Storage('ffscouterv3.');
+export default new Storage("ffscouterv3.");

@@ -1,4 +1,4 @@
-import logger from './logger';
+import logger from "./logger";
 
 // This was entirely vibe coded.
 
@@ -27,7 +27,7 @@ let httpPatched = false;
 
 export function setHttpInterceptor(interceptor: HttpInterceptor): void {
   if (httpInterceptor) {
-    throw new Error('HTTP interceptor already set. Only one allowed.');
+    throw new Error("HTTP interceptor already set. Only one allowed.");
   }
   httpInterceptor = interceptor;
   if (!httpPatched) patchFetch();
@@ -49,7 +49,7 @@ function patchFetch(): void {
         const requestIsObj = input instanceof Request;
         let url = requestIsObj
           ? (input as Request).url
-          : typeof input === 'string'
+          : typeof input === "string"
             ? input
             : input.toString();
         let currentInit = init as RequestInit | undefined;
@@ -64,7 +64,7 @@ function patchFetch(): void {
             method: r.method,
             headers: r.headers as unknown as HeadersInit,
             body:
-              r.method !== 'GET' && r.method !== 'HEAD'
+              r.method !== "GET" && r.method !== "HEAD"
                 ? (r.clone().body as BodyInit | null)
                 : undefined,
             credentials: r.credentials,
@@ -80,13 +80,13 @@ function patchFetch(): void {
         if (httpInterceptor.before) {
           try {
             const res = httpInterceptor.before(url, currentInit);
-            if (typeof res === 'string') url = res;
+            if (typeof res === "string") url = res;
             else if (res) {
               if (res.url) url = res.url;
               if (res.init) currentInit = res.init;
             }
           } catch (err) {
-            logger.error('HTTP before interceptor error:', err);
+            logger.error("HTTP before interceptor error:", err);
           }
         }
 
@@ -99,11 +99,11 @@ function patchFetch(): void {
         const response = await originalFetch(finalRequest, currentInit);
         if (!httpInterceptor.after) return response;
 
-        let bodyText = '';
+        let bodyText = "";
         try {
           bodyText = await response.clone().text();
         } catch (err) {
-          logger.error('Failed reading response body for interceptor:', err);
+          logger.error("Failed reading response body for interceptor:", err);
           return response;
         }
 
@@ -112,7 +112,7 @@ function patchFetch(): void {
             url,
             init: currentInit,
           });
-          if (typeof maybeNew === 'string') {
+          if (typeof maybeNew === "string") {
             return new Response(maybeNew, {
               status: response.status,
               statusText: response.statusText,
@@ -120,14 +120,14 @@ function patchFetch(): void {
             });
           }
         } catch (err) {
-          logger.error('HTTP after interceptor error:', err);
+          logger.error("HTTP after interceptor error:", err);
         }
         return response;
       } as typeof fetch;
     httpPatched = true;
-    logger.debug('Fetch patched for HTTP interception');
+    logger.debug("Fetch patched for HTTP interception");
   } catch (err) {
-    logger.error('Failed to patch fetch:', err);
+    logger.error("Failed to patch fetch:", err);
   }
 }
 
@@ -147,7 +147,7 @@ export function setWebSocketInterceptor(
   interceptor: WebSocketInterceptor,
 ): void {
   if (wsInterceptor)
-    throw new Error('WebSocket interceptor already set. Only one allowed.');
+    throw new Error("WebSocket interceptor already set. Only one allowed.");
   wsInterceptor = interceptor;
   if (!wsPatched) patchWebSocket();
 }
@@ -174,7 +174,7 @@ function patchWebSocket(): void {
             const maybe = wsInterceptor.beforeSend(data, socket);
             if (maybe !== undefined) data = maybe;
           } catch (err) {
-            logger.error('WS beforeSend interceptor error:', err);
+            logger.error("WS beforeSend interceptor error:", err);
           }
         }
         (originalSend as (payload: unknown) => void)(data);
@@ -186,7 +186,7 @@ function patchWebSocket(): void {
         listener: EventListenerOrEventListenerObject,
         options?: boolean | AddEventListenerOptions,
       ): void {
-        if (type !== 'message' || !wsInterceptor?.afterMessage) {
+        if (type !== "message" || !wsInterceptor?.afterMessage) {
           originalAdd(
             type,
             listener as EventListener,
@@ -204,14 +204,14 @@ function patchWebSocket(): void {
             );
             if (maybe !== undefined) newData = maybe;
           } catch (err) {
-            logger.error('WS afterMessage interceptor error:', err);
+            logger.error("WS afterMessage interceptor error:", err);
           }
           if (newData !== undefined && newData !== event.data) {
             try {
-              Object.defineProperty(event, 'data', { value: newData });
+              Object.defineProperty(event, "data", { value: newData });
             } catch {
-              const synthetic = new MessageEvent('message', { data: newData });
-              if (typeof listener === 'function') {
+              const synthetic = new MessageEvent("message", { data: newData });
+              if (typeof listener === "function") {
                 (listener as (e: MessageEvent) => unknown)(synthetic);
                 return;
               }
@@ -219,7 +219,7 @@ function patchWebSocket(): void {
               return;
             }
           }
-          if (typeof listener === 'function') {
+          if (typeof listener === "function") {
             (listener as (e: MessageEvent) => unknown)(event);
             return;
           }
@@ -232,21 +232,21 @@ function patchWebSocket(): void {
         );
       };
 
-      Object.defineProperty(socket, 'onmessage', {
+      Object.defineProperty(socket, "onmessage", {
         configurable: true,
         get() {
           return undefined;
         },
         set(handler: ((this: WebSocket, ev: MessageEvent) => unknown) | null) {
           if (!handler) return;
-          socket.addEventListener('message', (ev) => handler.call(socket, ev));
+          socket.addEventListener("message", (ev) => handler.call(socket, ev));
         },
       });
 
       return socket;
     } as unknown as typeof WebSocket;
 
-    (['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'] as const).forEach((k) => {
+    (["CONNECTING", "OPEN", "CLOSING", "CLOSED"] as const).forEach((k) => {
       try {
         (WrappedWS as unknown as Record<string, unknown>)[k] = (
           OriginalWS as unknown as Record<string, unknown>
@@ -263,9 +263,9 @@ function patchWebSocket(): void {
 
     wsPatched = true;
 
-    logger.debug('WebSocket patched for interception');
+    logger.debug("WebSocket patched for interception");
   } catch (err) {
-    logger.error('Failed to patch WebSocket:', err);
+    logger.error("Failed to patch WebSocket:", err);
   }
 }
 

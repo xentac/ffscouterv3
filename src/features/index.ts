@@ -1,4 +1,4 @@
-import TestFeature from './test-feature';
+import TestFeature from "./test-feature";
 
 export const Features = [TestFeature];
 

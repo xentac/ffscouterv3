@@ -1,8 +1,8 @@
-import logger from '@utils/logger';
-import { type Feature, StartTime } from '../feature';
+import logger from "@utils/logger";
+import { type Feature, StartTime } from "../feature";
 
 export default {
-  name: 'Test Feature!',
+  name: "Test Feature!",
   description: "It's literally a test feature :P",
   executionTime: StartTime.DocumentStart,
 
@@ -11,7 +11,7 @@ export default {
   },
 
   async run() {
-    logger.info('hello world but from feature');
+    logger.info("hello world but from feature");
   },
 
   httpIntercept: {

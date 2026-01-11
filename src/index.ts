@@ -1,19 +1,24 @@
-import { Features } from '@features/index';
-import logger from '@utils/logger';
-import { setHttpInterceptor } from '@utils/network';
+import { Features } from "@features/index";
+import { FFScouterAPI } from "@utils/ffscouterapi";
+import logger from "@utils/logger";
+import { setHttpInterceptor } from "@utils/network";
 
-const INJECTION_KEY = '__FF_SCOUTER_V3_INJECTED__';
+const INJECTION_KEY = "__FF_SCOUTER_V3_INJECTED__";
 
 async function main() {
   const w = window as unknown as Record<string, boolean>;
   if (w[INJECTION_KEY]) {
-    logger.info('Script already injected');
+    logger.info("Script already injected");
     return;
   }
   w[INJECTION_KEY] = true;
 
   // TODO: Add version code here
-  logger.info('Initializing');
+  logger.info("Initializing", __FF_SCOUTER_V3_VERSION__);
+
+  const ff_scouter_api = new FFScouterAPI("abcde");
+
+  ff_scouter_api.get_cached_estimates([12345]);
 
   // todo: settings panel
 

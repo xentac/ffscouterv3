@@ -26,10 +26,10 @@ class Logger {
 
   /** Color scheme for different log types */
   private colors = {
-    debug: '#7f8c8d',
-    info: '#3498db',
-    warn: '#f39c12',
-    error: '#e74c3c',
+    debug: "#7f8c8d",
+    info: "#3498db",
+    warn: "#f39c12",
+    error: "#e74c3c",
   };
 
   /**
@@ -37,7 +37,7 @@ class Logger {
    * @param prefix - Optional prefix to identify the source of log messages
    * @param level - Minimum log level to display, defaults to INFO
    */
-  constructor(prefix = '', level: LogLevel = LogLevel.DEBUG) {
+  constructor(prefix = "", level: LogLevel = LogLevel.DEBUG) {
     this.prefix = prefix;
     this.level = level;
   }
@@ -58,7 +58,7 @@ class Logger {
   public debug(...args: unknown[]): void {
     if (this.level <= LogLevel.DEBUG) {
       console.debug(
-        `%c${this.formatPrefix('DEBUG')}`,
+        `%c${this.formatPrefix("DEBUG")}`,
         `color: ${this.colors.debug}; font-weight: bold`,
         ...args,
       );
@@ -73,7 +73,7 @@ class Logger {
   public info(...args: unknown[]): void {
     if (this.level <= LogLevel.INFO) {
       console.info(
-        `%c${this.formatPrefix('INFO')}`,
+        `%c${this.formatPrefix("INFO")}`,
         `color: ${this.colors.info}; font-weight: bold`,
         ...args,
       );
@@ -88,7 +88,7 @@ class Logger {
   public warn(...args: unknown[]): void {
     if (this.level <= LogLevel.WARN) {
       console.warn(
-        `%c${this.formatPrefix('WARN')}`,
+        `%c${this.formatPrefix("WARN")}`,
         `color: ${this.colors.warn}; font-weight: bold`,
         ...args,
       );
@@ -103,7 +103,7 @@ class Logger {
   public error(...args: unknown[]): void {
     if (this.level <= LogLevel.ERROR) {
       console.error(
-        `%c${this.formatPrefix('ERROR')}`,
+        `%c${this.formatPrefix("ERROR")}`,
         `color: ${this.colors.error}; font-weight: bold`,
         ...args,
       );
@@ -118,9 +118,9 @@ class Logger {
   public group(label: string, collapsed = false): void {
     if (this.level < LogLevel.NONE) {
       if (collapsed) {
-        console.groupCollapsed(this.formatPrefix(''), label);
+        console.groupCollapsed(this.formatPrefix(""), label);
       } else {
-        console.group(this.formatPrefix(''), label);
+        console.group(this.formatPrefix(""), label);
       }
     }
   }
@@ -152,10 +152,10 @@ class Logger {
    * @private
    */
   private formatPrefix(level: string): string {
-    const prefix = this.prefix ? `[${this.prefix}]` : '';
+    const prefix = this.prefix ? `[${this.prefix}]` : "";
 
     return level ? `${prefix} - [${level}]: ` : `${prefix}: `;
   }
 }
 
-export default new Logger('FFSV3');
+export default new Logger("FFSV3");

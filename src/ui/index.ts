@@ -1,4 +1,4 @@
-import './styles.css';
+import "./styles.css";
 
 /*
 This is obviously personal preference but I'd see components work as such:

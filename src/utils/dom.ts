@@ -1,4 +1,4 @@
-import logger from './logger';
+import logger from "./logger";
 
 /**
  * Waits for an element matching the querySelector to appear in the DOM
@@ -51,10 +51,10 @@ export async function waitForElement<T extends Element>(
 export function getRFC(): string {
   try {
     const match = document.cookie.match(/(?:^|;\s*)rfc_v=([^;]*)/);
-    return match?.[1] ? decodeURIComponent(match[1]) : '';
+    return match?.[1] ? decodeURIComponent(match[1]) : "";
   } catch (e) {
-    logger.error('Error getting RFC token:', e);
-    return '';
+    logger.error("Error getting RFC token:", e);
+    return "";
   }
 }
 
@@ -69,13 +69,13 @@ export function getHashParameters(hash?: string): URLSearchParams {
   // Really sorry if that's the case, it's been a long time since I made this :(
   let finalHash = hash || location.hash;
 
-  if (finalHash.startsWith('#/')) {
+  if (finalHash.startsWith("#/")) {
     finalHash = finalHash.substring(2);
-  } else if (finalHash.startsWith('#') || finalHash.startsWith('/')) {
+  } else if (finalHash.startsWith("#") || finalHash.startsWith("/")) {
     finalHash = finalHash.substring(1);
   }
 
-  if (!finalHash.startsWith('!') && !finalHash.startsWith('?')) {
+  if (!finalHash.startsWith("!") && !finalHash.startsWith("?")) {
     finalHash = `?${finalHash}`;
   }
 
@@ -88,12 +88,12 @@ export function getHashParameters(hash?: string): URLSearchParams {
 export function waitForDocumentReady(): Promise<void> {
   return new Promise((resolve) => {
     if (
-      document.readyState === 'complete' ||
-      document.readyState === 'interactive'
+      document.readyState === "complete" ||
+      document.readyState === "interactive"
     ) {
       resolve();
     } else {
-      document.addEventListener('DOMContentLoaded', () => resolve());
+      document.addEventListener("DOMContentLoaded", () => resolve());
     }
   });
 }
@@ -104,20 +104,20 @@ export function waitForDocumentReady(): Promise<void> {
  */
 export async function getLocalUserId(): Promise<string | null> {
   const name = await waitForElement<HTMLAnchorElement>(
-    '.settings-menu > .link > a:first-child',
+    ".settings-menu > .link > a:first-child",
     15_000,
   );
 
   if (!name || !name.href) {
-    logger.debug('Failed to find the XID element.');
+    logger.debug("Failed to find the XID element.");
     return null;
   }
 
   try {
     const params = new URL(name.href).searchParams;
-    return params.get('XID');
+    return params.get("XID");
   } catch {
-    logger.debug('User XID is malformed');
+    logger.debug("User XID is malformed");
     return null;
   }
 }
