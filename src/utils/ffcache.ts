@@ -42,7 +42,7 @@ export class FFCache {
         const store = db.createObjectStore(STORES.CACHE, {
           keyPath: "player_id",
         });
-        store.createIndex("expiry", ["expiry"], {
+        store.createIndex("expiry", "expiry", {
           unique: false,
         });
       },
@@ -55,7 +55,7 @@ export class FFCache {
 
   open = async () => {
     if (this.db) {
-      return;
+      return this.db;
     }
     const cache = this;
     this.db = await openDB<CacheDB>(this.db_name, 1, {
@@ -77,10 +77,7 @@ export class FFCache {
         logger.debug(
           `Can't open ${blockedVersion} because ${currentVersion} is open. Closing and reopening.`,
         );
-        if (!cache.db) {
-          return;
-        }
-        cache.db.close();
+        cache.db?.close();
       },
       /*blocked(currentVersion, blockedVersion, event) {
         // …
@@ -89,6 +86,8 @@ export class FFCache {
         // …
       },*/
     });
+
+    return this.db;
   };
 
   close = () => {
@@ -109,51 +108,29 @@ export class FFCache {
   get = async (
     player_ids: PlayerId[],
   ): Promise<Map<PlayerId, CachedFFData | null>> => {
-    await this.open();
-    if (!this.db) {
-      logger.error("Tried to open IndexedDB but failed.");
-      throw new Error("Tried to open IndexedDB but failed.");
-    }
+    const db = await this.open();
+    const tx = db.transaction(STORES.CACHE, "readonly");
 
-    const tx = this.db.transaction(STORES.CACHE, "readonly");
-
-    const requests = [];
-
-    for (const id of player_ids) {
-      requests.push(tx.store.get(id));
-    }
+    // Issue all get requests in parallel
+    const requests = player_ids.map((id) => tx.store.get(id));
     const entries = await Promise.all(requests);
 
     await tx.done;
 
-    if (!entries) {
-      return new Map();
-    }
+    // Zip player_ids and entries without indexing
+    const result = new Map<PlayerId, CachedFFData | null>();
+    player_ids.forEach((id, idx) => {
+      const value = entries[idx];
+      result.set(id, !value || value.expiry <= Date.now() ? null : value);
+    });
 
-    return new Map(
-      entries.map((value, i) => {
-        if (!value) {
-          if (!player_ids[i]) {
-            return [-1, null];
-          }
-          return [player_ids[i], null];
-        }
-        if (value.expiry < Date.now()) {
-          return [value.player_id, null];
-        }
-        return [value.player_id, value];
-      }),
-    );
+    return result;
   };
 
   update = async (values: FFData[]): Promise<void> => {
-    await this.open();
-    if (!this.db) {
-      logger.error("Tried to open IndexedDB but failed.");
-      throw new Error("Tried to open IndexedDB but failed.");
-    }
+    const db = await this.open();
 
-    const tx = this.db.transaction(STORES.CACHE, "readwrite");
+    const tx = db.transaction(STORES.CACHE, "readwrite");
 
     const values_expiry = values.map((value) => {
       return {
@@ -172,42 +149,27 @@ export class FFCache {
   };
 
   clean_expired = async () => {
-    await this.open();
-    if (!this.db) {
-      logger.error("Tried to open IndexedDB but failed.");
-      throw new Error("Tried to open IndexedDB but failed.");
-    }
-    const tx = this.db.transaction(STORES.CACHE, "readwrite");
+    const db = await this.open();
+    const tx = db.transaction(STORES.CACHE, "readwrite");
 
     const index = tx.store.index("expiry");
 
-    const range = IDBKeyRange.upperBound(Date.now(), true);
+    const range = IDBKeyRange.upperBound(Date.now());
 
     const r = await index.getAllKeys(range);
     logger.info(`Found ${r.length} expired values to delete.`);
 
-    let deletes = 0;
-
-    r.map(async (id) => {
-      const res = await tx.store.delete(id);
-      deletes++;
-      return res;
-    });
+    const res = await Promise.all(r.map((id) => tx.store.delete(id)));
 
     await tx.done;
 
-    tx.commit();
-    logger.info(`Cleaned ${deletes} expired values from cache.`);
+    logger.info(`Cleaned ${res.length} expired values from cache.`);
   };
 
   dump = async () => {
-    await this.open();
-    if (!this.db) {
-      logger.error("Tried to open IndexedDB but failed.");
-      throw new Error("Tried to open IndexedDB but failed.");
-    }
+    const db = await this.open();
 
-    const tx = this.db.transaction(STORES.CACHE, "readonly");
+    const tx = db.transaction(STORES.CACHE, "readonly");
 
     const res = await tx.store.getAll();
 
