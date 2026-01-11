@@ -55,7 +55,7 @@ function is_ff_success(resp: FFSuccess[] | FFError): resp is FFSuccess[] {
 export const query_stats = async (
   key: TornApiKey,
   player_ids: PlayerId[],
-): Promise<FFData[]> => {
+): Promise<Map<PlayerId, FFData>> => {
   const url = make_stats_url(key, player_ids);
 
   const resp = await gmRequest({
@@ -64,7 +64,7 @@ export const query_stats = async (
   });
 
   if (!resp) {
-    return [];
+    return new Map();
   }
   if (resp.status !== 200) {
     try {
@@ -85,7 +85,7 @@ export const query_stats = async (
   if (!is_ff_success(ff_response)) {
     throw new Error(ff_response.error); // TODO figure out how to raise codes
   }
-  const results: FFData[] = [];
+  const results: Map<PlayerId, FFData> = new Map();
   ff_response.forEach((result) => {
     if (result?.player_id) {
       if (
@@ -94,12 +94,12 @@ export const query_stats = async (
         !result.bs_estimate ||
         !result.bs_estimate_human
       ) {
-        results.push({
+        results.set(result.player_id, {
           no_data: true,
           player_id: result.player_id,
         });
       } else {
-        results.push({
+        results.set(result.player_id, {
           no_data: false,
           fair_fight: result.fair_fight,
           last_updated: result.last_updated,
