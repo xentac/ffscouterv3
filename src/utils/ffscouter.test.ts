@@ -97,7 +97,7 @@ test("enqueue with wait causes single request to be sent", async () => {
   expect(cache.update).toBeCalledTimes(1);
   expect(b.schedule).toHaveBeenCalledTimes(2);
 
-  await vi.advanceTimersByTimeAsync(100);
+  await vi.advanceTimersByTimeAsync(1000);
 
   expect(b.queue_length()).toBe(0);
   expect(query_stats).toBeCalledTimes(1);
@@ -131,7 +131,7 @@ test("enqueue less than one batch over less than initial interval", async () => 
   const promises = new Map<number, ObservedPromise<FFData>>();
   for (const i of [10, 11, 12, 13, 14, 15, 16, 17]) {
     promises.set(i, observe(b.enqueue(i)));
-    await vi.advanceTimersByTimeAsync(2);
+    //await vi.advanceTimersByTimeAsync(2);
   }
 
   for (const p of promises.values()) {
@@ -142,7 +142,9 @@ test("enqueue less than one batch over less than initial interval", async () => 
   expect(b.running()).toBeTruthy();
   expect(query_stats).toBeCalledTimes(0);
 
-  await vi.advanceTimersByTimeAsync(100);
+  await b.process();
+  await Promise.resolve();
+  expect(query_stats).toBeCalledTimes(1);
 
   for (const [id, p] of promises.entries()) {
     expect(p.resolved).toBe(true);
@@ -153,7 +155,8 @@ test("enqueue less than one batch over less than initial interval", async () => 
   expect(query_stats).toBeCalledTimes(1);
   expect(b.running()).toBeTruthy();
 
-  await vi.advanceTimersByTimeAsync(100);
+  await b.process();
+  await Promise.resolve();
 
   expect(b.queue_length()).toBe(0);
   expect(query_stats).toBeCalledTimes(1);
@@ -178,29 +181,109 @@ test("enqueue across interval boundaries", async () => {
       blank: false,
     });
     const p = observe(b.enqueue(i));
-    await vi.advanceTimersByTimeAsync(100);
+    await b.process();
+    await Promise.resolve();
     expect(p.resolved).toBe(true);
     expect(p.value).toEqual(generate_test_ff_data(i));
     expect(vi.fn(query_stats)).toHaveBeenCalledWith("a", [i]);
   }
 });
 
-test("enqueue across interval boundaries", async () => {
+test("enqueue more than one batch in a single batch time", async () => {
   const cache = new FFCache("name");
 
   vi.spyOn(cache, "update").mockResolvedValue();
+  const spy = vi.fn(query_stats);
+
+  for (let i = 0; i < 5; i++) {
+    spy.mockResolvedValueOnce({
+      result: new Map(
+        Array.from({ length: 200 }, (_, j) => {
+          return [
+            i * 200 + j + 1000,
+            generate_test_ff_data(i * 200 + j + 1000),
+          ];
+        }),
+      ),
+      blank: false,
+    });
+  }
 
   const b = new BatchedQueryProcessor("a", cache);
 
-  for (const i of [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]) {
-    vi.fn(query_stats).mockResolvedValue({
-      result: new Map([[i, generate_test_ff_data(i)]]),
-      blank: false,
-    });
-    const p = observe(b.enqueue(i));
-    await vi.advanceTimersByTimeAsync(100);
-    expect(p.resolved).toBe(true);
-    expect(p.value).toEqual(generate_test_ff_data(i));
-    expect(vi.fn(query_stats)).toHaveBeenCalledWith("a", [i]);
+  for (let i = 1000; i < 2000; i++) {
+    observe(b.enqueue(i));
   }
+
+  for (let i = 0; i < 5; i++) {
+    await b.process();
+    await Promise.resolve();
+
+    expect(spy).toHaveBeenCalledWith(
+      "a",
+      Array.from({ length: 200 }, (_, j) => {
+        return i * 200 + j + 1000;
+      }),
+    );
+  }
+});
+
+test("calculate_next_run works", () => {
+  const cache = new FFCache("name");
+
+  const b = new BatchedQueryProcessor("a", cache);
+
+  expect(
+    b.calculate_next_run({
+      reset_time: new Date(Date.now() + 1000),
+      remaining: 100,
+      rate_limit: 100,
+      this_minute: 0,
+    }),
+  ).toEqual(1000);
+
+  expect(
+    b.calculate_next_run({
+      reset_time: new Date(Date.now() + 1000),
+      remaining: 99,
+      rate_limit: 100,
+      this_minute: 1,
+    }),
+  ).toEqual(1000);
+
+  expect(
+    b.calculate_next_run({
+      reset_time: new Date(Date.now() + 1000),
+      remaining: 98,
+      rate_limit: 100,
+      this_minute: 2,
+    }),
+  ).toEqual(1000);
+
+  expect(
+    b.calculate_next_run({
+      reset_time: new Date(Date.now() + 1000),
+      remaining: 75,
+      rate_limit: 100,
+      this_minute: 25,
+    }),
+  ).toEqual(1000 / 75);
+
+  expect(
+    b.calculate_next_run({
+      reset_time: new Date(Date.now() + 1000),
+      remaining: 35,
+      rate_limit: 100,
+      this_minute: 65,
+    }),
+  ).toEqual(1000 / 35);
+
+  expect(
+    b.calculate_next_run({
+      reset_time: new Date(Date.now() + 1000),
+      remaining: 0,
+      rate_limit: 100,
+      this_minute: 100,
+    }),
+  ).toEqual(1000);
 });

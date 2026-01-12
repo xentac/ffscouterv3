@@ -54,7 +54,7 @@ function is_ff_success(resp: FFSuccess[] | FFError): resp is FFSuccess[] {
   return (resp as FFError).code === undefined;
 }
 
-type FFApiRateLimits = {
+export type FFApiRateLimits = {
   reset_time: Date;
   remaining: number;
   rate_limit: number;

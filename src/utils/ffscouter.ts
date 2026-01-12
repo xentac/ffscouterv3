@@ -1,4 +1,4 @@
-import { query_stats } from "./api";
+import { FFApiError, query_stats, type FFApiRateLimits } from "./api";
 import { FFCache } from "./ffcache";
 import logger from "./logger";
 import type { FFData, PlayerId, TornApiKey } from "./types";
@@ -69,6 +69,7 @@ export class BatchedQueryProcessor {
 
   private max_ids_per_request = 200;
   private initial_collect_time = 100;
+  private default_delay = 1000;
   private max_attempts = 5;
 
   private cache: FFCache;
@@ -117,6 +118,23 @@ export class BatchedQueryProcessor {
     return this.get_unscheduled().length;
   };
 
+  calculate_next_run(limits: FFApiRateLimits): number {
+    // If we have no more requests, wait till the limit resets
+    if (limits.remaining <= 0) {
+      return limits.reset_time.getTime() - Date.now();
+      // If we've passed the reset time
+    } else if (limits.reset_time < new Date()) {
+      return 100;
+    }
+    // If we are in our first 25% of requests, let them spam quickly
+    else if (limits.rate_limit * 0.75 < limits.remaining) {
+      return 1000;
+    } else {
+      const ms_left = limits.reset_time.getTime() - Date.now();
+      return ms_left / limits.remaining;
+    }
+  }
+
   process = async () => {
     this.runner = null;
     let unscheduled = this.get_unscheduled();
@@ -138,7 +156,7 @@ export class BatchedQueryProcessor {
       return id;
     });
 
-    let next_run = this.initial_collect_time;
+    let next_run = this.default_delay;
 
     try {
       logger.info(`Making ffscouter stat query for ${ids_to_query.length} ids`);
@@ -157,7 +175,7 @@ export class BatchedQueryProcessor {
           }
           job.in_flight = false;
         }
-        next_run = 500;
+        next_run = this.default_delay;
         return;
       }
 
@@ -201,7 +219,10 @@ export class BatchedQueryProcessor {
         }
       }
 
-      // TODO: Process limits data to schedule next run
+      // Process limits data to schedule next run
+      if (results.limits) {
+        next_run = this.calculate_next_run(results.limits);
+      }
     } catch (error) {
       logger.error("Received error response querying ffscouter api:", error);
       for (const id of ids_to_query) {
@@ -213,6 +234,10 @@ export class BatchedQueryProcessor {
         this.queue.delete(id);
         for (const { reject } of job.resolvers) {
           reject(error);
+        }
+        const ff_error = error as FFApiError;
+        if (ff_error.ff_api_limits) {
+          next_run = this.calculate_next_run(ff_error.ff_api_limits);
         }
       }
     } finally {
