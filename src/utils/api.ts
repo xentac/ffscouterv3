@@ -40,6 +40,7 @@ export type FFSuccess = {
   fair_fight: number | null;
   bs_estimate: number | null;
   bs_estimate_human: string | null;
+  bss_public: number | null;
   last_updated: number | null;
 };
 
@@ -100,36 +101,37 @@ export const query_stats = async (
   }
 
   const limits = parse_limit_headers(resp.responseHeaders);
-
-  if (resp.status !== 200) {
-    try {
-      const err: FFError = JSON.parse(resp.responseText);
-      if (err.error) {
-        throw new FFApiError(
-          `API request failed. Error: ${err.error}; Code: ${err.code}`,
-          { ff_api_error: err, ff_api_limits: limits },
-        );
-      } else {
-        throw new FFApiError(
-          `API request failed. HTTP status code: ${resp.status}`,
-          { ff_api_limits: limits },
-        );
-      }
-    } catch {
-      throw new FFApiError(
-        `API request failed. HTTP status code: ${resp.status}`,
-        { ff_api_limits: limits },
-      );
-    }
+  let ff_response: FFSuccess[] | FFError | null = null;
+  try {
+    ff_response = JSON.parse(resp.responseText);
+  } catch {
+    throw new FFApiError(
+      `API request failed. Couldn't parse response. HTTP status code: ${resp.status}`,
+      { ff_api_limits: limits },
+    );
+  }
+  if (ff_response == null) {
+    // Shouldn't happen
+    throw new FFApiError(
+      `API request failed. Response not set. HTTP status code: ${resp.status}`,
+      { ff_api_limits: limits },
+    );
   }
 
-  const ff_response: FFSuccess[] | FFError = JSON.parse(resp.responseText);
   if (!is_ff_success(ff_response)) {
     throw new FFApiError(
       `API request failed. Error: ${ff_response.error}; Code: ${ff_response.code}`,
       { ff_api_error: ff_response, ff_api_limits: limits },
     );
   }
+
+  if (resp.status !== 200) {
+    throw new FFApiError(
+      `API request failed. HTTP status code: ${resp.status}`,
+      { ff_api_limits: limits },
+    );
+  }
+
   const results: Map<PlayerId, FFData> = new Map();
   ff_response.forEach((result) => {
     if (result?.player_id) {
@@ -137,7 +139,8 @@ export const query_stats = async (
         !result.fair_fight ||
         !result.last_updated ||
         !result.bs_estimate ||
-        !result.bs_estimate_human
+        !result.bs_estimate_human ||
+        !result.bss_public
       ) {
         results.set(result.player_id, {
           no_data: true,
@@ -150,6 +153,7 @@ export const query_stats = async (
           last_updated: result.last_updated,
           bs_estimate: result.bs_estimate,
           bs_estimate_human: result.bs_estimate_human,
+          bss_public: result.bss_public,
           player_id: result.player_id,
         });
       }

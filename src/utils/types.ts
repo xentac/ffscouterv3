@@ -11,6 +11,7 @@ export type FFData =
       last_updated: Timestamp;
       bs_estimate: number;
       bs_estimate_human: string;
+      bss_public: number;
       player_id: PlayerId;
     }
   | { no_data: true; player_id: PlayerId };
