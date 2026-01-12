@@ -287,3 +287,30 @@ test("calculate_next_run works", () => {
     }),
   ).toEqual(1000);
 });
+
+test("next_run is calculated based on limits returned", async () => {
+  const cache = new FFCache("name");
+
+  vi.spyOn(cache, "update").mockResolvedValue();
+  vi.fn(query_stats).mockResolvedValue({
+    result: new Map([[10, generate_test_ff_data(10)]]),
+    blank: false,
+    limits: {
+      reset_time: new Date(Date.now() + 10_000),
+      remaining: 5,
+      rate_limit: 100,
+      this_minute: 95,
+    },
+  });
+
+  const b = new BatchedQueryProcessor("a", cache);
+  vi.spyOn(b, "schedule");
+
+  expect(b.schedule).toHaveBeenCalledTimes(0);
+  b.enqueue(10);
+
+  await b.process();
+  await Promise.resolve();
+
+  expect(b.schedule).toHaveBeenCalledWith(b.process, 2000);
+});
