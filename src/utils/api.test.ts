@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { FFApiError, type gmRequest, make_stats_url, query_stats } from "./api";
+import { generate_test_ff_data } from "./test";
 
 test("make_stats_url generates proper url", () => {
   expect(make_stats_url("a", [1])).toEqual(
@@ -107,30 +108,9 @@ x-ratelimit-remaining: 118\n",
     readyState: 4,
     response: "",
     responseText: JSON.stringify([
-      {
-        player_id: 234,
-        fair_fight: 1.01,
-        bs_estimate: 11249,
-        bs_estimate_human: "11.2k",
-        bss_public: 208,
-        last_updated: 1767667811,
-      },
-      {
-        player_id: 567,
-        fair_fight: 12.21,
-        bs_estimate: 8110418660,
-        bs_estimate_human: "8.11b",
-        bss_public: 176618,
-        last_updated: 1768045549,
-      },
-      {
-        player_id: 1,
-        fair_fight: null,
-        bs_estimate: null,
-        bs_estimate_human: null,
-        bss_public: null,
-        last_updated: null,
-      },
+      generate_test_ff_data(234),
+      generate_test_ff_data(567),
+      generate_test_ff_data(20),
     ]),
     responseXML: null,
     status: 200,
@@ -139,39 +119,11 @@ x-ratelimit-remaining: 118\n",
     context: {},
   });
 
-  expect(await query_stats("a", [234, 567, 1], success)).toEqual({
+  expect(await query_stats("a", [234, 567, 20], success)).toEqual({
     result: new Map([
-      [
-        234,
-        {
-          player_id: 234,
-          no_data: false,
-          fair_fight: 1.01,
-          bs_estimate: 11249,
-          bs_estimate_human: "11.2k",
-          bss_public: 208,
-          last_updated: 1767667811,
-        },
-      ],
-      [
-        567,
-        {
-          player_id: 567,
-          no_data: false,
-          fair_fight: 12.21,
-          bs_estimate: 8110418660,
-          bs_estimate_human: "8.11b",
-          bss_public: 176618,
-          last_updated: 1768045549,
-        },
-      ],
-      [
-        1,
-        {
-          player_id: 1,
-          no_data: true,
-        },
-      ],
+      [234, generate_test_ff_data(234)],
+      [567, generate_test_ff_data(567)],
+      [20, generate_test_ff_data(20)],
     ]),
     blank: false,
     limits: {

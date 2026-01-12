@@ -1,5 +1,6 @@
 import { TornApiClient } from "tornapi-typescript";
 import type { FFData, PlayerId, TornApiKey } from "./types";
+import logger from "./logger";
 
 /// <reference types="tampermonkey" />
 
@@ -89,6 +90,7 @@ export const query_stats = async (
   player_ids: PlayerId[],
   requester: typeof gmRequest = gmRequest,
 ): Promise<FFApiQueryResponse> => {
+  logger.debug("Calling query_stats with arguments", { key, player_ids });
   const url = make_stats_url(key, player_ids);
 
   const resp = await requester({

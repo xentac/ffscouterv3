@@ -53,6 +53,7 @@ export class FFScouter {
 type Job<T> = {
   resolvers: Resolver<T>[];
   in_flight: boolean;
+  attempts: number;
 };
 
 type Resolver<T> = {
@@ -60,15 +61,15 @@ type Resolver<T> = {
   reject: (reason?: unknown) => void;
 };
 
-class BatchedQueryProcessor {
+export class BatchedQueryProcessor {
   private key: TornApiKey;
   private queue: Map<PlayerId, Job<FFData>> = new Map();
-  private scheduled: boolean = false;
 
   private runner: ReturnType<typeof setTimeout> | null = null;
 
   private max_ids_per_request = 200;
   private initial_collect_time = 100;
+  private max_attempts = 5;
 
   private cache: FFCache;
 
@@ -76,6 +77,10 @@ class BatchedQueryProcessor {
     this.key = key;
     this.cache = cache;
   }
+
+  change_key = (key: TornApiKey) => {
+    this.key = key;
+  };
 
   enqueue = async (id: PlayerId): Promise<FFData> => {
     return new Promise((resolve, reject) => {
@@ -90,50 +95,59 @@ class BatchedQueryProcessor {
       this.queue.set(id, {
         in_flight: false,
         resolvers: [{ resolve, reject }],
+        attempts: 0,
       });
 
-      this.scheduled = true;
       this.start();
     });
   };
 
+  get_unscheduled = () => {
+    return Array.from(
+      this.queue.entries().filter(([_, job]): boolean => {
+        if (job.in_flight) {
+          return false;
+        }
+        return true;
+      }),
+    );
+  };
+
+  queue_length = () => {
+    return this.get_unscheduled().length;
+  };
+
   process = async () => {
-    if (!this.scheduled) {
-      this.runner = null;
+    this.runner = null;
+    let unscheduled = this.get_unscheduled();
+    logger.debug(
+      "Starting process with unscheduled length",
+      unscheduled.length,
+    );
+    if (unscheduled.length <= 0) {
+      logger.debug("Stopping processor nothing to do");
       return;
     }
 
-    logger.debug("Doing a process");
-    logger.debug(this.queue);
-
-    let ids_to_query = Array.from(
-      this.queue
-        .entries()
-        .filter(([_, job]): boolean => {
-          if (job.in_flight) {
-            return false;
-          }
-          return true;
-        })
-        .map(([id, job]): PlayerId => {
-          job.in_flight = true;
-          return id;
-        }),
-    );
-
-    if (ids_to_query.length > this.max_ids_per_request) {
-      ids_to_query = ids_to_query.slice(0, this.max_ids_per_request);
+    if (unscheduled.length > this.max_ids_per_request) {
+      unscheduled = unscheduled.slice(0, this.max_ids_per_request);
     }
-    this.scheduled = false;
+
+    const ids_to_query = unscheduled.map(([id, job]) => {
+      job.in_flight = true;
+      return id;
+    });
 
     let next_run = this.initial_collect_time;
 
     try {
       logger.info(`Making ffscouter stat query for ${ids_to_query.length} ids`);
       const results = await query_stats(this.key, ids_to_query);
+      //logger.debug("Received result", results);
 
       // API didn't respond case
       if (results.blank) {
+        logger.debug("Got a blank result, will retry request in 500ms");
         // This is a special case where Torn PDA returns no values because we requested the same URL too quickly, try querying again
         for (const id of ids_to_query) {
           const job = this.queue.get(id);
@@ -143,24 +157,47 @@ class BatchedQueryProcessor {
           }
           job.in_flight = false;
         }
-        this.scheduled = true;
         next_run = 500;
         return;
       }
 
       // Update the cache with the new responses from the ffscoter api
-      void this.cache.update(Array.from(results.result.values()));
+      this.cache.update(Array.from(results.result.values()));
+      logger.debug("Updated cache");
 
+      const processed: Set<PlayerId> = new Set();
       // Happy path
       for (const [id, d] of results.result) {
+        logger.debug("Processing result", [id, d]);
         const job = this.queue.get(id);
         // How did we ask for a result but it was never queued in the first place?
         if (!job) {
           continue;
         }
+        processed.add(id);
         this.queue.delete(id);
         for (const { resolve } of job.resolvers) {
           resolve(d);
+        }
+      }
+
+      for (const [id, job] of unscheduled) {
+        if (!processed.has(id)) {
+          job.in_flight = false;
+          job.attempts++;
+
+          if (job.attempts <= this.max_attempts) {
+            logger.error(
+              `Didn't receive query response for id ${id}. Rescheduling attempt ${job.attempts}.`,
+            );
+          } else {
+            logger.error(
+              `Didn't receive query response for id ${id}. Max attempts reached. Giving up.`,
+            );
+            for (const { reject } of job.resolvers) {
+              reject(new Error("Max attempts reached."));
+            }
+          }
         }
       }
 
@@ -179,13 +216,18 @@ class BatchedQueryProcessor {
         }
       }
     } finally {
-      this.runner = setTimeout(this.process, next_run);
+      logger.debug("Rescheduling processor for", next_run, "ms");
+      this.runner = this.schedule(this.process, next_run);
     }
+  };
+
+  schedule = (fn: () => void, delay: number) => {
+    return setTimeout(fn, delay);
   };
 
   start = () => {
     if (!this.runner) {
-      this.runner = setTimeout(this.process, this.initial_collect_time);
+      this.runner = this.schedule(this.process, this.initial_collect_time);
     }
   };
 
@@ -194,5 +236,12 @@ class BatchedQueryProcessor {
       clearTimeout(this.runner);
     }
     this.runner = null;
+  };
+
+  running = () => {
+    if (this.runner) {
+      return true;
+    }
+    return false;
   };
 }
