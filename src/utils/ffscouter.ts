@@ -68,6 +68,7 @@ class BatchedQueryProcessor {
   private runner: ReturnType<typeof setTimeout> | null = null;
 
   private max_ids_per_request = 200;
+  private initial_collect_time = 100;
 
   private cache: FFCache;
 
@@ -98,7 +99,7 @@ class BatchedQueryProcessor {
 
   process = async () => {
     if (!this.scheduled) {
-      this.runner = setTimeout(this.process, 100);
+      this.runner = null;
       return;
     }
 
@@ -125,7 +126,7 @@ class BatchedQueryProcessor {
     }
     this.scheduled = false;
 
-    let next_run = 100;
+    let next_run = this.initial_collect_time;
 
     try {
       logger.info(`Making ffscouter stat query for ${ids_to_query.length} ids`);
@@ -184,12 +185,14 @@ class BatchedQueryProcessor {
 
   start = () => {
     if (!this.runner) {
-      this.runner = setTimeout(this.process, 100);
+      this.runner = setTimeout(this.process, this.initial_collect_time);
     }
   };
 
   stop = () => {
-    this.runner?.close();
+    if (this.runner) {
+      clearTimeout(this.runner);
+    }
     this.runner = null;
   };
 }
