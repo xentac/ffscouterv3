@@ -3,8 +3,9 @@ import { query_stats } from "./api";
 import { FFCache } from "./ffcache";
 import { FFScouter } from "./ffscouter";
 import { generate_test_ff_data } from "./test.js";
-import type { FFData, PlayerId } from "./types.js";
+import type { FFData } from "./types.js";
 import logger from "./logger.js";
+import { FFConfig } from "./ffconfig.js";
 
 vi.mock(import("./api.js"), () => {
   return {
@@ -55,10 +56,13 @@ const prime_cache = async (c: FFCache) => {
   await c.update(datas);
 };
 
+const config = new FFConfig("test");
+config.key = "a";
+
 test("start creates runner that runs and does nothing", async () => {
   const c = new FFCache("name");
 
-  const b = new FFScouter("a", c);
+  const b = new FFScouter(config, c);
   vi.spyOn(b, "schedule");
 
   await prime_cache(c);
@@ -74,7 +78,7 @@ test("start creates runner that runs and does nothing", async () => {
 });
 
 test("promises returned are same for same id but different for different id", async () => {
-  const f = new FFScouter("a");
+  const f = new FFScouter(config);
 
   const p = f.get(1);
   const q = f.get(1);
@@ -87,7 +91,7 @@ test("promises returned are same for same id but different for different id", as
 test("promises returned after processing is done are different", async () => {
   const c = new FFCache("name");
 
-  const f = new FFScouter("a", c);
+  const f = new FFScouter(config, c);
   vi.spyOn(c, "get").mockResolvedValue(new Map());
   vi.spyOn(c, "update").mockResolvedValue();
 
@@ -131,7 +135,7 @@ test("enqueue less than one batch over less than initial interval", async () => 
     blank: false,
   });
 
-  const f = new FFScouter("a", c);
+  const f = new FFScouter(config, c);
   vi.spyOn(f, "schedule");
 
   const promises = new Map<number, ObservedPromise<FFData>>();
@@ -163,7 +167,7 @@ test("enqueue less than one batch over less than initial interval", async () => 
   expect(query_stats).toBeCalledTimes(1);
 
   expect(query_stats).toHaveBeenCalledWith(
-    "a",
+    config.key,
     [10, 11, 12, 13, 14, 15, 16, 17],
   );
 });
@@ -174,7 +178,7 @@ test("get across interval boundaries", async () => {
   vi.spyOn(c, "get").mockResolvedValue(new Map());
   vi.spyOn(c, "update").mockResolvedValue();
 
-  const f = new FFScouter("a", c);
+  const f = new FFScouter(config, c);
 
   for (const i of [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]) {
     vi.fn(query_stats).mockResolvedValue({
@@ -187,7 +191,7 @@ test("get across interval boundaries", async () => {
     await Promise.resolve();
     expect(p.resolved).toBe(true);
     expect(p.value).toEqual(generate_test_ff_data(i));
-    expect(vi.fn(query_stats)).toHaveBeenCalledWith("a", [i]);
+    expect(vi.fn(query_stats)).toHaveBeenCalledWith(config.key, [i]);
   }
 });
 
@@ -212,7 +216,7 @@ test("enqueue more than one batch in a single batch time", async () => {
     });
   }
 
-  const f = new FFScouter("a", c);
+  const f = new FFScouter(config, c);
 
   for (let i = 1000; i < 2000; i++) {
     observe(f.get(i));
@@ -224,7 +228,7 @@ test("enqueue more than one batch in a single batch time", async () => {
     await Promise.resolve();
 
     expect(spy).toHaveBeenCalledWith(
-      "a",
+      config.key,
       Array.from({ length: 200 }, (_, j) => {
         return i * 200 + j + 1000;
       }),
@@ -233,7 +237,7 @@ test("enqueue more than one batch in a single batch time", async () => {
 });
 
 test("calculate_next_run works", () => {
-  const f = new FFScouter("a");
+  const f = new FFScouter(config);
 
   expect(
     f.calculate_next_api_run({
@@ -306,7 +310,7 @@ test("next_run is calculated based on limits returned", async () => {
     },
   });
 
-  const f = new FFScouter("a", c);
+  const f = new FFScouter(config, c);
   vi.spyOn(f, "schedule");
 
   expect(f.schedule).toHaveBeenCalledTimes(0);
@@ -319,17 +323,10 @@ test("next_run is calculated based on limits returned", async () => {
   expect(f.schedule).toHaveBeenCalledWith(f.process_api, 2000);
 });
 
-test("change_key changes the key", async () => {
-  const f = new FFScouter("a");
-  expect(f.get_key()).toBe("a");
-  f.change_key("b");
-  expect(f.get_key()).toBe("b");
-});
-
 test("complete schedules execution now", async () => {
   const c = new FFCache("name");
 
-  const f = new FFScouter("a", c);
+  const f = new FFScouter(config, c);
   vi.spyOn(c, "get").mockResolvedValue(new Map());
   vi.spyOn(c, "update").mockResolvedValue();
 

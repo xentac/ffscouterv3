@@ -5,6 +5,7 @@ import {
   query_stats,
 } from "./api";
 import { FFCache } from "./ffcache";
+import type { FFConfig } from "./ffconfig";
 import logger from "./logger";
 import type { FFData, PlayerId, TornApiKey } from "./types";
 
@@ -18,7 +19,7 @@ type Job<T> = {
 };
 
 export class FFScouter {
-  private key: TornApiKey;
+  private config: FFConfig;
 
   private cache: FFCache = new FFCache(DB_NAME);
 
@@ -35,21 +36,13 @@ export class FFScouter {
   private api_timer: ReturnType<typeof setTimeout> | null = null;
   private api_attempts = 5;
 
-  constructor(key: TornApiKey, cache?: FFCache) {
-    this.key = key;
+  constructor(config: FFConfig, cache?: FFCache) {
+    this.config = config;
 
     if (cache) {
       this.cache = cache;
     }
   }
-
-  change_key = (key: string) => {
-    this.key = key;
-  };
-
-  get_key = () => {
-    return this.key;
-  };
 
   schedule = (fn: () => void, delay: number) => {
     return setTimeout(fn, delay);
@@ -184,8 +177,8 @@ export class FFScouter {
     let next_run: number | undefined = this.api_default_delay;
     let results: FFApiQueryResponse;
     try {
-      logger.debug("Calling query_stats with", this.key, ",", ids);
-      results = await query_stats(this.key, ids);
+      logger.debug("Calling query_stats with", this.config.key, ",", ids);
+      results = await query_stats(this.config.key, ids);
     } catch (err) {
       logger.error("Received error response querying ffscouter api:", err);
       for (const id of ids) {
