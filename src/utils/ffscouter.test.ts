@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { query_stats } from "./api";
-
-import { BatchedQueryProcessor } from "./ffscouter";
 import { FFCache } from "./ffcache";
+import { FFScouter } from "./ffscouter";
 import { generate_test_ff_data } from "./test.js";
-import type { FFData } from "./types.js";
+import type { FFData, PlayerId } from "./types.js";
+import logger from "./logger.js";
 
 vi.mock(import("./api.js"), () => {
   return {
@@ -46,72 +46,77 @@ function observe<T>(p: Promise<T>): ObservedPromise<T> {
   return o;
 }
 
+const prime_cache = async (c: FFCache) => {
+  const datas = [];
+  for (let i = 0; i < 200; i++) {
+    datas.push(generate_test_ff_data(i + 1000));
+  }
+
+  await c.update(datas);
+};
+
 test("start creates runner that runs and does nothing", async () => {
-  const cache = new FFCache("name");
+  const c = new FFCache("name");
 
-  vi.spyOn(cache, "update").mockResolvedValue();
-
-  const b = new BatchedQueryProcessor("a", cache);
+  const b = new FFScouter("a", c);
   vi.spyOn(b, "schedule");
 
-  expect(b.running()).toBeFalsy();
+  await prime_cache(c);
 
   expect(b.schedule).not.toHaveBeenCalled();
-  b.start();
-  expect(b.schedule).toHaveBeenCalled();
+  b.schedule_cache();
+  expect(b.schedule).toHaveBeenCalledWith(b.process_cache, 10);
 
-  expect(b.running()).toBeTruthy();
-  await vi.advanceTimersByTimeAsync(50);
-  expect(b.running()).toBeTruthy();
-  await vi.advanceTimersByTimeAsync(50);
-  expect(b.running()).toBeFalsy();
-  expect(query_stats).toBeCalledTimes(0);
-  expect(b.schedule).toHaveBeenCalledTimes(1);
+  b.schedule_api();
+  expect(b.schedule).toHaveBeenCalledWith(b.process_api, 100);
+
+  await c.delete_db();
 });
 
-test("enqueue with wait causes single request to be sent", async () => {
-  const cache = new FFCache("name");
+test("promises returned are same for same id but different for different id", async () => {
+  const f = new FFScouter("a");
 
-  vi.spyOn(cache, "update").mockResolvedValue();
+  const p = f.get(1);
+  const q = f.get(1);
+  const r = f.get(2);
+
+  expect(p).toBe(q);
+  expect(p).not.toBe(r);
+});
+
+test("promises returned after processing is done are different", async () => {
+  const c = new FFCache("name");
+
+  const f = new FFScouter("a", c);
+  vi.spyOn(c, "get").mockResolvedValue(new Map());
+  vi.spyOn(c, "update").mockResolvedValue();
+
   vi.fn(query_stats).mockResolvedValue({
-    result: new Map([[10, generate_test_ff_data(10)]]),
+    result: new Map([[1, generate_test_ff_data(1)]]),
     blank: false,
   });
 
-  const b = new BatchedQueryProcessor("a", cache);
-  vi.spyOn(b, "schedule");
+  const p = f.get(1);
 
-  expect(b.schedule).toHaveBeenCalledTimes(0);
-  const p = b.enqueue(10);
-  expect(b.queue_length()).toBe(1);
-  expect(b.running()).toBeTruthy();
-  expect(query_stats).toBeCalledTimes(0);
-  expect(cache.update).toBeCalledTimes(0);
-  expect(b.schedule).toHaveBeenCalledTimes(1);
-
+  await vi.advanceTimersByTimeAsync(10);
   await vi.advanceTimersByTimeAsync(100);
 
-  expect(b.queue_length()).toBe(0);
-  expect(query_stats).toBeCalledTimes(1);
-  expect(b.running()).toBeTruthy();
-  expect(cache.update).toBeCalledTimes(1);
-  expect(b.schedule).toHaveBeenCalledTimes(2);
+  const q = f.get(1);
 
-  await vi.advanceTimersByTimeAsync(1000);
+  expect(p).not.toBe(q);
 
-  expect(b.queue_length()).toBe(0);
-  expect(query_stats).toBeCalledTimes(1);
-  expect(b.running()).toBeFalsy();
-  expect(cache.update).toBeCalledTimes(1);
-  expect(b.schedule).toHaveBeenCalledTimes(2);
+  expect(await p).toEqual(generate_test_ff_data(1));
 
-  expect(await p).toEqual(generate_test_ff_data(10));
+  expect(c.update).toBeCalledTimes(1);
+
+  await c.delete_db();
 });
 
 test("enqueue less than one batch over less than initial interval", async () => {
-  const cache = new FFCache("name");
+  const c = new FFCache("name");
 
-  vi.spyOn(cache, "update").mockResolvedValue();
+  vi.spyOn(c, "get").mockResolvedValue(new Map());
+  vi.spyOn(c, "update").mockResolvedValue();
   vi.fn(query_stats).mockResolvedValue({
     result: new Map([
       [10, generate_test_ff_data(10)],
@@ -126,41 +131,36 @@ test("enqueue less than one batch over less than initial interval", async () => 
     blank: false,
   });
 
-  const b = new BatchedQueryProcessor("a", cache);
+  const f = new FFScouter("a", c);
+  vi.spyOn(f, "schedule");
 
   const promises = new Map<number, ObservedPromise<FFData>>();
   for (const i of [10, 11, 12, 13, 14, 15, 16, 17]) {
-    promises.set(i, observe(b.enqueue(i)));
-    //await vi.advanceTimersByTimeAsync(2);
+    promises.set(i, observe(f.get(i)));
   }
+  expect(f.schedule).toHaveBeenCalledWith(f.process_cache, 10);
 
   for (const p of promises.values()) {
     expect(p.resolved).toBe(false);
   }
 
-  expect(b.queue_length()).toBe(8);
-  expect(b.running()).toBeTruthy();
-  expect(query_stats).toBeCalledTimes(0);
-
-  await b.process();
+  await f.process_cache();
+  expect(f.schedule).toHaveBeenCalledWith(f.process_api, 100);
+  await f.process_api();
   await Promise.resolve();
   expect(query_stats).toBeCalledTimes(1);
+  expect(f.schedule).toHaveBeenCalledWith(f.process_api, 1000);
 
   for (const [id, p] of promises.entries()) {
     expect(p.resolved).toBe(true);
     expect(p.value).toEqual(generate_test_ff_data(id));
   }
 
-  expect(b.queue_length()).toBe(0);
-  expect(query_stats).toBeCalledTimes(1);
-  expect(b.running()).toBeTruthy();
-
-  await b.process();
+  await f.process_cache();
+  await f.process_api();
   await Promise.resolve();
 
-  expect(b.queue_length()).toBe(0);
   expect(query_stats).toBeCalledTimes(1);
-  expect(b.running()).toBeFalsy();
 
   expect(query_stats).toHaveBeenCalledWith(
     "a",
@@ -168,20 +168,22 @@ test("enqueue less than one batch over less than initial interval", async () => 
   );
 });
 
-test("enqueue across interval boundaries", async () => {
-  const cache = new FFCache("name");
+test("get across interval boundaries", async () => {
+  const c = new FFCache("name");
 
-  vi.spyOn(cache, "update").mockResolvedValue();
+  vi.spyOn(c, "get").mockResolvedValue(new Map());
+  vi.spyOn(c, "update").mockResolvedValue();
 
-  const b = new BatchedQueryProcessor("a", cache);
+  const f = new FFScouter("a", c);
 
   for (const i of [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]) {
     vi.fn(query_stats).mockResolvedValue({
       result: new Map([[i, generate_test_ff_data(i)]]),
       blank: false,
     });
-    const p = observe(b.enqueue(i));
-    await b.process();
+    const p = observe(f.get(i));
+    await f.process_cache();
+    await f.process_api();
     await Promise.resolve();
     expect(p.resolved).toBe(true);
     expect(p.value).toEqual(generate_test_ff_data(i));
@@ -190,9 +192,10 @@ test("enqueue across interval boundaries", async () => {
 });
 
 test("enqueue more than one batch in a single batch time", async () => {
-  const cache = new FFCache("name");
+  const c = new FFCache("name");
 
-  vi.spyOn(cache, "update").mockResolvedValue();
+  vi.spyOn(c, "get").mockResolvedValue(new Map());
+  vi.spyOn(c, "update").mockResolvedValue();
   const spy = vi.fn(query_stats);
 
   for (let i = 0; i < 5; i++) {
@@ -209,14 +212,15 @@ test("enqueue more than one batch in a single batch time", async () => {
     });
   }
 
-  const b = new BatchedQueryProcessor("a", cache);
+  const f = new FFScouter("a", c);
 
   for (let i = 1000; i < 2000; i++) {
-    observe(b.enqueue(i));
+    observe(f.get(i));
   }
 
   for (let i = 0; i < 5; i++) {
-    await b.process();
+    await f.process_cache();
+    await f.process_api();
     await Promise.resolve();
 
     expect(spy).toHaveBeenCalledWith(
@@ -229,12 +233,10 @@ test("enqueue more than one batch in a single batch time", async () => {
 });
 
 test("calculate_next_run works", () => {
-  const cache = new FFCache("name");
-
-  const b = new BatchedQueryProcessor("a", cache);
+  const f = new FFScouter("a");
 
   expect(
-    b.calculate_next_run({
+    f.calculate_next_api_run({
       reset_time: new Date(Date.now() + 1000),
       remaining: 100,
       rate_limit: 100,
@@ -243,7 +245,7 @@ test("calculate_next_run works", () => {
   ).toEqual(1000);
 
   expect(
-    b.calculate_next_run({
+    f.calculate_next_api_run({
       reset_time: new Date(Date.now() + 1000),
       remaining: 99,
       rate_limit: 100,
@@ -252,7 +254,7 @@ test("calculate_next_run works", () => {
   ).toEqual(1000);
 
   expect(
-    b.calculate_next_run({
+    f.calculate_next_api_run({
       reset_time: new Date(Date.now() + 1000),
       remaining: 98,
       rate_limit: 100,
@@ -261,7 +263,7 @@ test("calculate_next_run works", () => {
   ).toEqual(1000);
 
   expect(
-    b.calculate_next_run({
+    f.calculate_next_api_run({
       reset_time: new Date(Date.now() + 1000),
       remaining: 75,
       rate_limit: 100,
@@ -270,7 +272,7 @@ test("calculate_next_run works", () => {
   ).toEqual(1000 / 75);
 
   expect(
-    b.calculate_next_run({
+    f.calculate_next_api_run({
       reset_time: new Date(Date.now() + 1000),
       remaining: 35,
       rate_limit: 100,
@@ -279,7 +281,7 @@ test("calculate_next_run works", () => {
   ).toEqual(1000 / 35);
 
   expect(
-    b.calculate_next_run({
+    f.calculate_next_api_run({
       reset_time: new Date(Date.now() + 1000),
       remaining: 0,
       rate_limit: 100,
@@ -289,9 +291,10 @@ test("calculate_next_run works", () => {
 });
 
 test("next_run is calculated based on limits returned", async () => {
-  const cache = new FFCache("name");
+  const c = new FFCache("name");
 
-  vi.spyOn(cache, "update").mockResolvedValue();
+  vi.spyOn(c, "get").mockResolvedValue(new Map());
+  vi.spyOn(c, "update").mockResolvedValue();
   vi.fn(query_stats).mockResolvedValue({
     result: new Map([[10, generate_test_ff_data(10)]]),
     blank: false,
@@ -303,14 +306,43 @@ test("next_run is calculated based on limits returned", async () => {
     },
   });
 
-  const b = new BatchedQueryProcessor("a", cache);
-  vi.spyOn(b, "schedule");
+  const f = new FFScouter("a", c);
+  vi.spyOn(f, "schedule");
 
-  expect(b.schedule).toHaveBeenCalledTimes(0);
-  b.enqueue(10);
+  expect(f.schedule).toHaveBeenCalledTimes(0);
+  f.get(10);
+  expect(f.schedule).toHaveBeenCalledWith(f.process_cache, 10);
 
-  await b.process();
-  await Promise.resolve();
+  await f.process_cache();
+  expect(f.schedule).toHaveBeenCalledWith(f.process_api, 100);
+  await f.process_api();
+  expect(f.schedule).toHaveBeenCalledWith(f.process_api, 2000);
+});
 
-  expect(b.schedule).toHaveBeenCalledWith(b.process, 2000);
+test("change_key changes the key", async () => {
+  const f = new FFScouter("a");
+  expect(f.get_key()).toBe("a");
+  f.change_key("b");
+  expect(f.get_key()).toBe("b");
+});
+
+test("complete schedules execution now", async () => {
+  const c = new FFCache("name");
+
+  const f = new FFScouter("a", c);
+  vi.spyOn(c, "get").mockResolvedValue(new Map());
+  vi.spyOn(c, "update").mockResolvedValue();
+
+  vi.fn(query_stats).mockResolvedValue({
+    result: new Map([[1, generate_test_ff_data(1)]]),
+    blank: false,
+  });
+  vi.spyOn(f, "process_cache");
+
+  f.get(1);
+  expect(f.process_cache).not.toHaveBeenCalled();
+  f.complete();
+  expect(f.process_cache).toHaveBeenCalled();
+
+  await c.delete_db();
 });

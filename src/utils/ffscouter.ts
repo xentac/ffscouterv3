@@ -1,272 +1,282 @@
-import { FFApiError, query_stats, type FFApiRateLimits } from "./api";
+import {
+  type FFApiError,
+  type FFApiQueryResponse,
+  type FFApiRateLimits,
+  query_stats,
+} from "./api";
 import { FFCache } from "./ffcache";
 import logger from "./logger";
 import type { FFData, PlayerId, TornApiKey } from "./types";
 
 const DB_NAME = "FFSV3-cache";
 
+type Job<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+  api_attempts: number;
+};
+
 export class FFScouter {
-  private key: string;
+  private key: TornApiKey;
 
   private cache: FFCache = new FFCache(DB_NAME);
 
-  private batched_query_processor: BatchedQueryProcessor;
+  private pending = new Map<PlayerId, Job<FFData>>();
 
-  constructor(key: string) {
+  private cache_queue = new Set<PlayerId>();
+  private cache_delay = 10;
+  private cache_timer: ReturnType<typeof setTimeout> | null = null;
+
+  private api_queue = new Set<PlayerId>();
+  private api_max_batch_size = 200;
+  private api_initial_delay = 100;
+  private api_default_delay = 1000;
+  private api_timer: ReturnType<typeof setTimeout> | null = null;
+  private api_attempts = 5;
+
+  constructor(key: TornApiKey, cache?: FFCache) {
     this.key = key;
-    this.batched_query_processor = new BatchedQueryProcessor(
-      this.key,
-      this.cache,
-    );
+
+    if (cache) {
+      this.cache = cache;
+    }
   }
 
   change_key = (key: string) => {
     this.key = key;
   };
 
-  get_cached_estimates = async (
-    player_ids: PlayerId[],
-  ): Promise<Map<PlayerId, FFData | null>> => {
-    logger.info(`Querying cache for ${player_ids.length} players.`);
-    return this.cache.get(player_ids);
-  };
-
-  get_estimates = async (
-    player_ids: PlayerId[],
-  ): Promise<Promise<FFData>[]> => {
-    // NOTE: This API may look awkward right now, but that's because it will
-    // eventually support arbitrary batching. Each Promise will return its value
-    // when we have a result, either from the cache or from one of potentially
-    // many api calls.
-    const cached = await this.get_cached_estimates(player_ids);
-
-    return player_ids.map((id) => {
-      const c = cached.get(id);
-      if (c) {
-        return new Promise((resolve) => resolve(c));
-      }
-      return this.batched_query_processor.enqueue(id);
-    });
-  };
-}
-
-type Job<T> = {
-  resolvers: Resolver<T>[];
-  in_flight: boolean;
-  attempts: number;
-};
-
-type Resolver<T> = {
-  resolve: (value: T) => void;
-  reject: (reason?: unknown) => void;
-};
-
-export class BatchedQueryProcessor {
-  private key: TornApiKey;
-  private queue: Map<PlayerId, Job<FFData>> = new Map();
-
-  private runner: ReturnType<typeof setTimeout> | null = null;
-
-  private max_ids_per_request = 200;
-  private initial_collect_time = 100;
-  private default_delay = 1000;
-  private max_attempts = 5;
-
-  private cache: FFCache;
-
-  constructor(key: TornApiKey, cache: FFCache) {
-    this.key = key;
-    this.cache = cache;
-  }
-
-  change_key = (key: TornApiKey) => {
-    this.key = key;
-  };
-
-  enqueue = async (id: PlayerId): Promise<FFData> => {
-    return new Promise((resolve, reject) => {
-      const existing = this.queue.get(id);
-
-      // If a queued request for this ID already exists, just piggyback off of it
-      if (existing) {
-        existing.resolvers.push({ resolve, reject });
-        return;
-      }
-
-      this.queue.set(id, {
-        in_flight: false,
-        resolvers: [{ resolve, reject }],
-        attempts: 0,
-      });
-
-      this.start();
-    });
-  };
-
-  get_unscheduled = () => {
-    return Array.from(
-      this.queue.entries().filter(([_, job]): boolean => {
-        if (job.in_flight) {
-          return false;
-        }
-        return true;
-      }),
-    );
-  };
-
-  queue_length = () => {
-    return this.get_unscheduled().length;
-  };
-
-  calculate_next_run(limits: FFApiRateLimits): number {
-    // If we have no more requests, wait till the limit resets
-    if (limits.remaining <= 0) {
-      return limits.reset_time.getTime() - Date.now();
-      // If we've passed the reset time
-    } else if (limits.reset_time < new Date()) {
-      return 100;
-    }
-    // If we are in our first 25% of requests, let them spam quickly
-    else if (limits.rate_limit * 0.75 < limits.remaining) {
-      return 1000;
-    } else {
-      const ms_left = limits.reset_time.getTime() - Date.now();
-      return ms_left / limits.remaining;
-    }
-  }
-
-  process = async () => {
-    this.runner = null;
-    let unscheduled = this.get_unscheduled();
-    logger.debug(
-      "Starting process with unscheduled length",
-      unscheduled.length,
-    );
-    if (unscheduled.length <= 0) {
-      logger.debug("Stopping processor nothing to do");
-      return;
-    }
-
-    if (unscheduled.length > this.max_ids_per_request) {
-      unscheduled = unscheduled.slice(0, this.max_ids_per_request);
-    }
-
-    const ids_to_query = unscheduled.map(([id, job]) => {
-      job.in_flight = true;
-      return id;
-    });
-
-    let next_run = this.default_delay;
-
-    try {
-      logger.info(`Making ffscouter stat query for ${ids_to_query.length} ids`);
-      const results = await query_stats(this.key, ids_to_query);
-      //logger.debug("Received result", results);
-
-      // API didn't respond case
-      if (results.blank) {
-        logger.debug("Got a blank result, will retry request in 500ms");
-        // This is a special case where Torn PDA returns no values because we requested the same URL too quickly, try querying again
-        for (const id of ids_to_query) {
-          const job = this.queue.get(id);
-          // How did we ask for a result but it was never queued in the first place?
-          if (!job) {
-            continue;
-          }
-          job.in_flight = false;
-        }
-        next_run = this.default_delay;
-        return;
-      }
-
-      // Update the cache with the new responses from the ffscoter api
-      this.cache.update(Array.from(results.result.values()));
-      logger.debug("Updated cache");
-
-      const processed: Set<PlayerId> = new Set();
-      // Happy path
-      for (const [id, d] of results.result) {
-        logger.debug("Processing result", [id, d]);
-        const job = this.queue.get(id);
-        // How did we ask for a result but it was never queued in the first place?
-        if (!job) {
-          continue;
-        }
-        processed.add(id);
-        this.queue.delete(id);
-        for (const { resolve } of job.resolvers) {
-          resolve(d);
-        }
-      }
-
-      for (const [id, job] of unscheduled) {
-        if (!processed.has(id)) {
-          job.in_flight = false;
-          job.attempts++;
-
-          if (job.attempts <= this.max_attempts) {
-            logger.error(
-              `Didn't receive query response for id ${id}. Rescheduling attempt ${job.attempts}.`,
-            );
-          } else {
-            logger.error(
-              `Didn't receive query response for id ${id}. Max attempts reached. Giving up.`,
-            );
-            for (const { reject } of job.resolvers) {
-              reject(new Error("Max attempts reached."));
-            }
-          }
-        }
-      }
-
-      // Process limits data to schedule next run
-      if (results.limits) {
-        next_run = this.calculate_next_run(results.limits);
-      }
-    } catch (error) {
-      logger.error("Received error response querying ffscouter api:", error);
-      for (const id of ids_to_query) {
-        const job = this.queue.get(id);
-        // How did we ask for a result but it was never queued in the first place?
-        if (!job) {
-          continue;
-        }
-        this.queue.delete(id);
-        for (const { reject } of job.resolvers) {
-          reject(error);
-        }
-        const ff_error = error as FFApiError;
-        if (ff_error.ff_api_limits) {
-          next_run = this.calculate_next_run(ff_error.ff_api_limits);
-        }
-      }
-    } finally {
-      logger.debug("Rescheduling processor for", next_run, "ms");
-      this.runner = this.schedule(this.process, next_run);
-    }
+  get_key = () => {
+    return this.key;
   };
 
   schedule = (fn: () => void, delay: number) => {
     return setTimeout(fn, delay);
   };
 
-  start = () => {
-    if (!this.runner) {
-      this.runner = this.schedule(this.process, this.initial_collect_time);
+  clear = (timer: ReturnType<typeof setTimeout> | null | undefined) => {
+    if (timer) {
+      clearTimeout(timer);
     }
   };
 
-  stop = () => {
-    if (this.runner) {
-      clearTimeout(this.runner);
+  // Queue request to get estimate from cache or api, batching both types of requests
+  get = (player_id: PlayerId): Promise<FFData> => {
+    // If a request is already in the queue, return the Promise to the calling
+    const p = this.pending.get(player_id);
+    if (p) {
+      return p.promise;
     }
-    this.runner = null;
+
+    let resolve!: (v: FFData) => void;
+    let reject!: (e: unknown) => void;
+
+    const promise = new Promise<FFData>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+
+    this.pending.set(player_id, { promise, resolve, reject, api_attempts: 0 });
+
+    // Schedule cache lookup
+    this.enqueue_cache(player_id);
+
+    return promise;
   };
 
-  running = () => {
-    if (this.runner) {
-      return true;
+  // Tell the batch engine that the list of requests is complete for now so start processing
+  // NOTE: Processing may have started earlier for some elements if queuing took longer than processing intervals
+  complete = () => {
+    this.process_cache();
+  };
+
+  enqueue_cache = (player_id: PlayerId) => {
+    logger.debug(`Enqueuing cache ${player_id}`);
+    this.cache_queue.add(player_id);
+
+    this.schedule_cache();
+  };
+
+  schedule_cache = () => {
+    if (this.cache_timer) {
+      logger.debug(`schedule_cache called but job already scheduled`);
+      return;
     }
-    return false;
+    logger.debug(
+      `schedule_cache called and job scheduled for ${this.cache_delay} ms`,
+    );
+    this.cache_timer = this.schedule(this.process_cache, this.cache_delay);
+  };
+
+  process_cache = async () => {
+    logger.debug("process_cache called");
+    if (this.cache_timer) {
+      this.clear(this.cache_timer);
+      this.cache_timer = null;
+    }
+
+    const ids = Array.from(this.cache_queue);
+    this.cache_queue.clear();
+
+    if (ids.length <= 0) {
+      return;
+    }
+
+    let results: Map<PlayerId, FFData | null>;
+    try {
+      results = await this.cache.get(ids);
+    } catch (_) {
+      // Cache failure is usually non-fatal; fall through to API
+      results = new Map();
+    }
+    logger.debug("Received results", results);
+
+    for (const id of ids) {
+      const v = results.get(id);
+      if (v) {
+        logger.debug("Id", id, "found in cache. Resolving value.");
+        this.resolve(id, v);
+      } else {
+        logger.debug("Id", id, "not found in cache. Scheduling api call.");
+        this.enqueue_api(id);
+      }
+    }
+  };
+
+  enqueue_api = (player_id: PlayerId) => {
+    logger.debug(`Enqueuing api ${player_id}`);
+    this.api_queue.add(player_id);
+
+    this.schedule_api();
+  };
+
+  schedule_api = (delay = this.api_initial_delay) => {
+    if (this.api_timer) {
+      logger.debug(`schedule_api called but job already scheduled`);
+      return;
+    }
+    logger.debug(`schedule_api called and job scheduled for ${delay} ms`);
+    this.api_timer = this.schedule(this.process_api, delay);
+  };
+
+  process_api = async () => {
+    logger.debug("process_api called");
+    if (this.api_timer) {
+      this.clear(this.api_timer);
+      this.api_timer = null;
+    }
+
+    let ids = Array.from(this.api_queue);
+    if (ids.length > this.api_max_batch_size) {
+      ids = ids.slice(0, this.api_max_batch_size);
+    }
+    for (const id of ids) {
+      this.api_queue.delete(id);
+    }
+    logger.debug(`Processing ${ids} api requests`);
+
+    if (ids.length <= 0) {
+      logger.debug("No ids found to query");
+      return;
+    }
+
+    let next_run: number | undefined = this.api_default_delay;
+    let results: FFApiQueryResponse;
+    try {
+      logger.debug("Calling query_stats with", this.key, ",", ids);
+      results = await query_stats(this.key, ids);
+    } catch (err) {
+      logger.error("Received error response querying ffscouter api:", err);
+      for (const id of ids) {
+        this.reject(id, err);
+      }
+
+      const ff_error = err as FFApiError;
+      results = {
+        result: new Map(),
+        blank: true,
+        limits: ff_error.ff_api_limits,
+      };
+    }
+    logger.debug("Received results", results);
+
+    // This is the case where we made too many requests close in time and Torn PDA returned nothing
+    if (results.blank) {
+      for (const id of ids) {
+        this.requeue_api(id);
+      }
+    } else {
+      this.cache.update(Array.from(results.result.values()));
+      for (const id of ids) {
+        const v = results.result.get(id);
+        if (v) {
+          logger.debug("Id", id, "found in results. Resolving value.");
+          this.resolve(id, v);
+        } else {
+          logger.debug("Id", id, "not found in results. Resolving no_data.");
+          this.resolve(id, { player_id: id, no_data: true });
+        }
+      }
+    }
+
+    if (results.limits) {
+      next_run = this.calculate_next_api_run(results.limits);
+    }
+
+    this.schedule_api(next_run);
+  };
+
+  calculate_next_api_run = (limits: FFApiRateLimits): number => {
+    // If we have no more requests, wait till the limit resets
+    if (limits.remaining <= 0) {
+      return limits.reset_time.getTime() - Date.now();
+      // If we've passed the reset time
+    } else if (limits.reset_time < new Date()) {
+      return this.api_initial_delay;
+    }
+    // If we are in our first 25% of requests, let them spam quickly
+    else if (limits.rate_limit * 0.75 < limits.remaining) {
+      return this.api_default_delay;
+    } else {
+      const ms_left = limits.reset_time.getTime() - Date.now();
+      return ms_left / limits.remaining;
+    }
+  };
+
+  /**
+   * Promise lifecycle helpers
+   */
+  private resolve = (id: PlayerId, value: FFData) => {
+    const entry = this.pending.get(id);
+    if (!entry) return;
+
+    entry.resolve(value);
+    this.pending.delete(id);
+  };
+
+  private reject = (id: PlayerId, err: unknown) => {
+    const entry = this.pending.get(id);
+    if (!entry) return;
+
+    entry.reject(err);
+    this.pending.delete(id);
+  };
+
+  private requeue_api = (id: PlayerId) => {
+    const entry = this.pending.get(id);
+    if (!entry) return;
+
+    entry.api_attempts++;
+    if (entry.api_attempts > this.api_attempts) {
+      this.reject(
+        id,
+        new Error(`Too many failed attempts to get stats for ${id}.`),
+      );
+      return false;
+    }
+
+    this.enqueue_api(id);
+    return true;
   };
 }
