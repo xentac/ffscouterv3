@@ -6,30 +6,26 @@ import {
   wait_for_element,
 } from "@utils/dom";
 import { ffscouter } from "@utils/ffscouter";
+import logger from "@utils/logger";
 import { generate_info_line } from "@utils/strings";
 import type { FFData } from "@utils/types";
 import { type Feature, StartTime } from "../feature";
 
 function inject_info_line(h4: Element, info_line: Element) {
-  const links_top_wrap = h4.parentNode?.querySelector(".links-top-wrap");
-  if (links_top_wrap?.parentNode) {
-    links_top_wrap.parentNode.insertBefore(
-      info_line,
-      links_top_wrap.nextSibling,
-    );
-  } else {
-    h4.after(info_line);
-  }
+  h4.parentNode?.parentNode?.parentNode?.insertBefore(
+    info_line,
+    h4.parentNode?.parentNode?.nextSibling,
+  );
 }
 
 export default {
-  name: "Profile FF display",
-  description: "Shows FF on top left of any profile page",
+  name: "Attack FF display",
+  description: "Shows FF on top left of any attack page",
   executionTime: StartTime.DocumentStart,
 
   async shouldRun() {
-    // Run on the profile page
-    return torn_page("profiles");
+    // Run on the attack page
+    return torn_page("loader", "attack");
   },
 
   async run() {
@@ -39,11 +35,14 @@ export default {
       return;
     }
 
+    logger.debug("On the attack page, found player_id", player_id);
+
     // Create container to hold info line
     const info_line = create_info_line();
 
     // Query ff scouter for FFData
     ffscouter.get(player_id).then(async (data: FFData) => {
+      logger.debug("got ff scouter results");
       info_line.innerHTML = generate_info_line(data);
 
       // Figure out where to inject the info line

@@ -1,4 +1,35 @@
 import logger from "./logger";
+import type { PlayerId } from "./types";
+
+const ID_PARAMS = ["XID", "user2ID"];
+
+export function extract_id_from_url(url: string): PlayerId | null {
+  const parsed = new URL(url);
+  const search = new URLSearchParams(parsed.search);
+
+  for (const param of ID_PARAMS) {
+    const v = search.get(param);
+    if (v) {
+      return parseInt(v, 10);
+    }
+  }
+
+  return null;
+}
+
+export function torn_page(page: string, sid?: string) {
+  const url_match = window.location.href.startsWith(
+    `https://www.torn.com/${page}.php`,
+  );
+  let sid_match = true;
+  if (sid) {
+    const search = new URLSearchParams(window.location.search);
+    const page_sid = search.get("sid");
+    sid_match = page_sid !== null && sid === page_sid;
+  }
+
+  return url_match && sid_match;
+}
 
 /**
  * Waits for an element matching the querySelector to appear in the DOM
@@ -132,17 +163,6 @@ export async function getLocalUserId(): Promise<string | null> {
   } catch {
     logger.debug("User XID is malformed");
     return null;
-  }
-}
-export function inject_info_line(h4: Element, info_line: Element) {
-  const links_top_wrap = h4.parentNode?.querySelector(".links-top-wrap");
-  if (links_top_wrap?.parentNode) {
-    links_top_wrap.parentNode.insertBefore(
-      info_line,
-      links_top_wrap.nextSibling,
-    );
-  } else {
-    h4.after(info_line);
   }
 }
 export function create_info_line() {
