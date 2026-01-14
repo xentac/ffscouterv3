@@ -1,19 +1,24 @@
+import { Storage as StorageUtil } from "./storage";
 import type { TornApiKey } from "./types";
+
+enum CONFIG {
+  KEY = "key",
+}
 
 export class FFConfig {
   private name: string;
-
-  private _key: TornApiKey = "";
+  private storage: StorageUtil;
 
   constructor(name: string) {
     this.name = name;
+    this.storage = new StorageUtil(this.name);
   }
 
   get key(): TornApiKey {
-    return this._key;
+    return this.storage.get(CONFIG.KEY) ?? "";
   }
 
   set key(key: TornApiKey) {
-    this._key = key;
+    this.storage.set(CONFIG.KEY, key);
   }
 }
