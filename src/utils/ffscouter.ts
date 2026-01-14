@@ -5,7 +5,7 @@ import {
   query_stats,
 } from "./api";
 import { FFCache } from "./ffcache";
-import { FFConfig } from "./ffconfig";
+import { type FFConfig, ffconfig } from "./ffconfig";
 import logger from "./logger";
 import type { FFData, PlayerId } from "./types";
 
@@ -274,4 +274,4 @@ export class FFScouter {
   };
 }
 
-export const ffscouter = new FFScouter(new FFConfig("ffsv3"));
+export const ffscouter = new FFScouter(ffconfig);

@@ -6,9 +6,10 @@ import logger from "./logger";
  * @param timeout Optional timeout in milliseconds
  * @returns Promise resolving to the found element or null if timeout reached
  */
-export async function waitForElement<T extends Element>(
+export async function wait_for_element<T extends Element>(
   querySelector: string,
   timeout: number,
+  root?: Node,
 ): Promise<T | null> {
   const existingElement = document.querySelector<T>(querySelector);
   if (existingElement) return existingElement;
@@ -24,7 +25,10 @@ export async function waitForElement<T extends Element>(
       }
     });
 
-    observer.observe(document.body, {
+    if (!root) {
+      root = document.body;
+    }
+    observer.observe(root, {
       childList: true,
       subtree: true,
     });
@@ -41,6 +45,15 @@ export async function waitForElement<T extends Element>(
       if (timer) clearTimeout(timer);
     }
   });
+}
+
+export async function wait_for_body(timeout: number): Promise<boolean> {
+  const body = await wait_for_element(
+    "body",
+    timeout,
+    document.documentElement,
+  );
+  return body !== null;
 }
 
 /**
@@ -103,7 +116,7 @@ export function waitForDocumentReady(): Promise<void> {
  * @returns The current user ID or null if not found or malformed
  */
 export async function getLocalUserId(): Promise<string | null> {
-  const name = await waitForElement<HTMLAnchorElement>(
+  const name = await wait_for_element<HTMLAnchorElement>(
     ".settings-menu > .link > a:first-child",
     15_000,
   );
@@ -120,4 +133,24 @@ export async function getLocalUserId(): Promise<string | null> {
     logger.debug("User XID is malformed");
     return null;
   }
+}
+export function inject_info_line(h4: Element, info_line: Element) {
+  const links_top_wrap = h4.parentNode?.querySelector(".links-top-wrap");
+  if (links_top_wrap?.parentNode) {
+    links_top_wrap.parentNode.insertBefore(
+      info_line,
+      links_top_wrap.nextSibling,
+    );
+  } else {
+    h4.after(info_line);
+  }
+}
+export function create_info_line() {
+  const info_line = document.createElement("div");
+  info_line.className = "ffsv3-info-line";
+  info_line.style.display = "block";
+  info_line.style.clear = "both";
+  info_line.style.margin = "5px 0";
+
+  return info_line;
 }

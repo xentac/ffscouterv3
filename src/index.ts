@@ -1,7 +1,10 @@
 import { Features } from "@features/index";
-import { FFScouterAPI } from "@utils/ffscouterapi";
+import { query_stats } from "@utils/api";
+import { FFConfig } from "@utils/ffconfig";
+import { FFScouter } from "@utils/ffscouter";
 import logger from "@utils/logger";
 import { setHttpInterceptor } from "@utils/network";
+import type { FFData } from "@utils/types";
 
 const INJECTION_KEY = "__FF_SCOUTER_V3_INJECTED__";
 
@@ -16,9 +19,13 @@ async function main() {
   // TODO: Add version code here
   logger.info("Initializing", __FF_SCOUTER_V3_VERSION__);
 
-  const ff_scouter_api = new FFScouterAPI("abcde");
+  unsafeWindow["FFScouter"] = FFScouter;
+  unsafeWindow["query_stats"] = query_stats;
+  unsafeWindow["FFConfig"] = FFConfig;
 
-  ff_scouter_api.get_cached_estimates([12345]);
+  window["FFScouter"] = FFScouter;
+  window["query_stats"] = query_stats;
+  window["FFConfig"] = FFConfig;
 
   // todo: settings panel
 

@@ -22,3 +22,5 @@ export class FFConfig {
     this.storage.set(CONFIG.KEY, key);
   }
 }
+
+export const ffconfig = new FFConfig("ffsv3");
