@@ -5,9 +5,9 @@ import {
   query_stats,
 } from "./api";
 import { FFCache } from "./ffcache";
-import type { FFConfig } from "./ffconfig";
+import { FFConfig } from "./ffconfig";
 import logger from "./logger";
-import type { FFData, PlayerId, TornApiKey } from "./types";
+import type { FFData, PlayerId } from "./types";
 
 const DB_NAME = "FFSV3-cache";
 
@@ -273,3 +273,5 @@ export class FFScouter {
     return true;
   };
 }
+
+export const ffscouter = new FFScouter(new FFConfig("ffsv3"));
